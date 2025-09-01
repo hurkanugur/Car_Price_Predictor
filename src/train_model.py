@@ -2,92 +2,76 @@ from torch import nn
 import torch
 from sklearn.model_selection import train_test_split
 
-from config import EPOCHS, LR, VAL_INTERVAL
-from data_utils import load_raw_data, normalize_data, split_data
+from config import TRAINING_EPOCHS, LEARNING_RATE, VAL_INTERVAL
+from data_utils import extract_features_and_target, load_raw_data, normalize_data, split_data
 from model_utils import CarPriceRegressor, save_model, save_normalization_params
-from plot_utils import plot_losses
-import matplotlib.pyplot as plt
+from plot_utils import LossPlotter
 
-def train_model(model, X_train, y_train, loss_fn, optimizer, X_val=None, y_val=None):
+def train_model(model, X_train, y_train, loss_fn, optimizer, X_val, y_val, loss_plotter: LossPlotter):
     """
-    Train a PyTorch model on training data and optionally monitor validation loss.
-
-    Args:
-        model (nn.Module): PyTorch model to train.
-        X_train (Tensor): Training features.
-        y_train (Tensor): Training targets.
-        loss_fn: Loss function (e.g., nn.MSELoss()).
-        optimizer: Optimizer (e.g., torch.optim.Adam).
-        X_val (Tensor, optional): Validation features. Defaults to None.
-        y_val (Tensor, optional): Validation targets. Defaults to None.
-
-    Returns:
-        model (nn.Module): Trained model.
-        train_losses (list): Training loss values recorded at each validation interval.
-        val_losses (list): Validation loss values recorded at each validation interval.
+    Train and monitor the model.
     """
-    
-    train_losses = []
-    val_losses = []
+        
+    for epoch in range(TRAINING_EPOCHS):
+        model.train()                       # Set model to training mode
+        optimizer.zero_grad()               # Clear old gradients
 
-    for epoch in range(EPOCHS):
-        model.train()
-        optimizer.zero_grad()
-        y_pred = model(X_train)
-        loss = loss_fn(y_pred, y_train)
-        loss.backward()
-        optimizer.step()
+        y_pred = model(X_train)             # Forward pass
+        loss = loss_fn(y_pred, y_train)     # Compute loss
+        loss.backward()                     # Backpropagation
+        optimizer.step()                    # Update parameters
 
         # Record losses
-        if (epoch % VAL_INTERVAL == 0) or (epoch == EPOCHS - 1):
-            train_losses.append(loss.item())
-            if X_val is not None and y_val is not None:
-                model.eval()
-                with torch.no_grad():
-                    y_val_pred = model(X_val)
-                    val_loss = loss_fn(y_val_pred, y_val).item()
-                val_losses.append(val_loss)
-                print(f"Epoch {epoch} | Train Loss: {loss.item():.10f} | Val Loss: {val_loss:.10f}")
-            else:
-                val_losses.append(None)
-                print(f"Epoch {epoch} | Train Loss: {loss.item():.10f}")
+        if (epoch % VAL_INTERVAL == 0) or (epoch == TRAINING_EPOCHS - 1):
+            train_loss = loss.item()
+            val_loss = validate_model(model, X_val, y_val, loss_fn).item()
+            
+            # Update live plot
+            loss_plotter.update(train_loss=train_loss, val_loss=val_loss)
+            print(f"Epoch {epoch} | Train Loss: {train_loss:.10f} | Val Loss: {val_loss:.10f}")
 
-    return model, train_losses, val_losses
+    return model
 
 
-def evaluate_model(model, X, y, norm_params=None):
+def validate_model(model, X_val, y_val, loss_fn):
     """
-    Compute predictions from a trained model and optionally de-normalize them.
-
-    Args:
-        model (nn.Module): Trained PyTorch model.
-        X (torch.Tensor): Input features (already normalized if used in training).
-        y (torch.Tensor): True target values (already normalized if used in training).
-        norm_params (dict, optional): Dictionary with keys "y_mean" and "y_std" for de-normalization. Defaults to None.
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor]: 
-            - y_pred: Model predictions (de-normalized if norm_params provided).
-            - y_true: True target values (de-normalized if norm_params provided).
+    Validate the model.
     """
+
     model.eval()
     with torch.no_grad():
-        y_pred = model(X)
-        y_true = y
+        y_pred = model(X_val)
+        loss = loss_fn(y_pred, y_val)
 
-        # De-normalize so that we can see the real world values
-        if norm_params:
-            y_pred = y_pred * norm_params["y_std"] + norm_params["y_mean"]
-            y_true = y_true * norm_params["y_std"] + norm_params["y_mean"]
+    return loss
 
-    return y_pred, y_true
 
+def test_model(model, X_test, y_test, norm_params):
+    """
+    Test the model.
+    """
+
+    model.eval()
+    with torch.no_grad():
+        y_pred = model(X_test)
+        
+        # De-normalize predicted prices so that we can see in real-life price values
+        y_pred = y_pred * norm_params["y_std"] + norm_params["y_mean"]
+        y_true = y_test * norm_params["y_std"] + norm_params["y_mean"]
+
+    # Display sample comparison
+    print("\nSample Predicted vs True prices:")
+    for i in range(10):
+        print(f"Predicted: {y_pred[i].item():.2f}, True: {y_true[i].item():.2f}")
 
 def main():
     # Load raw data
-    X, y = load_raw_data()
+    df = load_raw_data()
+
+    # Extract features and target
+    X, y = extract_features_and_target(df)
     
-    # Split first
+    # Split data (training/val/test)
     X_train, X_val, X_test, y_train, y_val, y_test = split_data(X, y)
     
     # Normalize using TRAINING statistics
@@ -97,10 +81,13 @@ def main():
 
     model = CarPriceRegressor(input_dim=X.shape[1])
     loss_fn = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+    # Real-time loss plotter initialization
+    loss_plotter = LossPlotter()
 
     # Train with validation monitoring
-    model, train_losses, val_losses = train_model(
+    model = train_model(
         model=model,
         X_train=X_train,
         y_train=y_train,
@@ -108,18 +95,11 @@ def main():
         optimizer=optimizer,
         X_val=X_val,
         y_val=y_val,
+        loss_plotter=loss_plotter
     )
 
-    # Plot train/val loss curves
-    plot_losses(train_losses, val_losses)
-
-    # Evaluate on test
-    y_pred, y_true = evaluate_model(model, X_test, y_test, norm_params)
-
-    # Display sample comparison
-    print("\nSample Predicted vs True prices:")
-    for i in range(10):
-        print(f"Predicted: {y_pred[i].item():.2f}, True: {y_true[i].item():.2f}")
+    # Test the model
+    test_model(model, X_test, y_test, norm_params)
 
     # Save model and normalization parameters
     save_model(model)
@@ -133,6 +113,9 @@ def main():
     print("• Model: Linear regression with PyTorch")
     print("• Features: Normalization, train/val/test split")
     print("• Visuals: Training & validation loss curves\n")
+
+    # Keep the final plot displayed
+    loss_plotter.close()
 
 if __name__ == "__main__":
     main()

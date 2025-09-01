@@ -5,17 +5,20 @@ from config import SPLIT_DATASET, SPLIT_RANDOM_STATE, TEST_SET_SIZE, TRAIN_SET_S
 
 def load_raw_data():
     """
-    Load CSV data and extract features and target without normalization.
-    
-    Returns:
-        X (Tensor): Raw features
-        y (Tensor): Raw target
+    Load CSV data.
     """
 
     df = pd.read_csv(USED_CAR_CSV_PATH)
     print(f"\n• Dataset loaded: {df.shape[0]} rows, {df.shape[1]} columns\n")
     print(f"{df.head()}\n")
 
+    return df
+
+def extract_features_and_target(df):
+    """
+    Extracts input features (X) and target values (y) from the dataset.
+    """
+        
     # Feature 1: Car age
     age = df["model_year"].max() - df["model_year"]
 
@@ -41,9 +44,6 @@ def load_raw_data():
 def split_data(X, y):
     """
     Split raw data into train/val/test sets.
-
-    Returns:
-        X_train, X_val, X_test, y_train, y_val, y_test
     """
 
     if not SPLIT_DATASET:
@@ -62,9 +62,6 @@ def split_data(X, y):
 def normalize_data(X_train, X_val=None, X_test=None, y_train=None, y_val=None, y_test=None):
     """
     Normalize features and target using TRAINING set statistics.
-
-    Returns:
-        X_train_norm, X_val_norm, X_test_norm, y_train_norm, y_val_norm, y_test_norm, norm_params
     """
 
     # Features
