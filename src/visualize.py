@@ -1,6 +1,12 @@
+# visualize.py
+
 import matplotlib.pyplot as plt
 
-class LossPlotter:
+class LossMonitor:
+    """
+    Real-time plotting of training and validation loss.
+    """
+     
     def __init__(self):
         plt.ion()  # Interactive mode ON
         self.fig, self.ax = plt.subplots(figsize=(8, 5))
@@ -15,11 +21,19 @@ class LossPlotter:
         self.val_losses = []
 
     def update(self, train_loss, val_loss=None):
+        """
+        Append new loss values and update the plot.
+
+        Args:
+            train_loss (float): training loss for current epoch
+            val_loss (float, optional): validation loss for current epoch
+        """
         self.train_losses.append(train_loss)
         self.train_line.set_data(range(len(self.train_losses)), self.train_losses)
 
-        self.val_losses.append(val_loss)
-        self.val_line.set_data(range(len(self.val_losses)), self.val_losses)
+        if val_loss is not None:
+            self.val_losses.append(val_loss)
+            self.val_line.set_data(range(len(self.val_losses)), self.val_losses)
         
         # Update axes limits
         self.ax.relim()
@@ -28,6 +42,10 @@ class LossPlotter:
         plt.draw()
         plt.pause(0.001)  # Small pause to update the figure
 
+
     def close(self):
+        """
+        Keep final plot displayed.
+        """
         plt.ioff()
         plt.show()
